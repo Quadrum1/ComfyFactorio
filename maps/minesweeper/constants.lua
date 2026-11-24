@@ -59,6 +59,10 @@ Constants.rendering_tile_values =
     ['refined-hazard-concrete-right'] = { offset = { 0.54, -0.26 }, zoom = 3, font = 'default-game' }
 }
 
+Constants.mark_mine_text = {
+    [10] = {text = "Mine marked.", color = { r = 0.98, g = 0.66, b = 0.22 }},
+    [11] = {text = "Already marked!", color = { r = 0.98, g = 0.9, b = 0.3 }}
+}
 
 Constants.chunk_divide_vectors = {}
 for x = 0, 30, 2 do

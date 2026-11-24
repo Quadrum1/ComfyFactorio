@@ -264,4 +264,59 @@ function Public.uncover_terrain(position, surface_index)
     end
 end
 
+function Public.get_cell_minecount(cell)
+    if not cell then return 0 end
+
+    if cell == 10 then return 1 end
+    if cell == 11 then return 1 end
+
+    return 0
+end
+
+
+-- Returns count of spilled items
+function Public.return_item_to_inventory_or_spill(inventory, stack, position)
+    local count = stack.count
+
+    local inserted_count = inventory.insert(stack)
+
+    if count == inserted_count then return 0 end
+
+    local spill_count = count - inserted_count
+    local remaining_stack = { name = stack.name, count = spill_count, quality = stack.quality }
+    surface.spill_item_stack({ position = { position.x + 1, position.y + 1 }, stack = remaining_stack, enable_looted = true })
+    return spill_count
+end
+
+function Public.deny_built_entity(event, return_inventory)
+    local entity = event.entity
+    if not entity then return end
+
+    local items = entity.prototype.items_to_place_this
+    if not items or not items[1] then
+        return
+    end
+
+    local stack = { name = items[1].name, count = items[1].count, quality = entity.quality }
+    local position = entity.position
+
+    entity.destroy()
+
+    Public.return_item_to_inventory_or_spill(return_inventory, stack, position)
+end
+
+function Public.select_furnace(player)
+    player.pipette(prototypes.item["stone-furnace"])
+end
+
+ function Public.get_solving_vectors(position)
+    local distance_to_center = math.sqrt(position.x ^ 2 + position.y ^ 2)
+    local key = math.floor(distance_to_center * 0.005) + 1
+    if key > Constants.size_of_solving_vector_tables then
+        key = Constants.size_of_solving_vector_tables
+    end
+    local solving_vectors = Constants.solving_vector_tables[key]
+    return solving_vectors
+end
+
 return Public
