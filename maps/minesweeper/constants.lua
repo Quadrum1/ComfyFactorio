@@ -17,8 +17,19 @@ Normal minesweeper ruloes are used for now.
 
 local Constants = {}
 
+Constants.safe_zone_radius = 16
 
+Constants.ores = {}
+Constants.ores[1] = {}
+Constants.ores[2] = {}
+for _ = 1, 15, 1 do table.insert(Constants.ores[1], "iron-ore") end
+for _ = 1, 9, 1 do table.insert(Constants.ores[1], "coal") end
+for _ = 1, 1, 1 do table.insert(Constants.ores[1], "crude-oil") end
+for _ = 1, 6, 1 do table.insert(Constants.ores[2], "copper-ore") end
+for _ = 1, 4, 1 do table.insert(Constants.ores[2], "stone") end
+for _ = 1, 1, 1 do table.insert(Constants.ores[2], "uranium-ore") end
 
+Constants.default_color = { 125, 125, 125 }
 Constants.number_colors =
 {
     [1] = { 0, 0, 210 },
@@ -33,8 +44,10 @@ Constants.number_colors =
 }
 
 
+
 Constants.rendering_tile_values =
 {
+    ['default'] = { offset = { 0.6, -0.2 }, zoom = 3, font = 'scenario-message-dialog' },
     ['nuclear-ground'] = { offset = { 0.6, -0.2 }, zoom = 3, font = 'scenario-message-dialog' },
     --['stone-path'] = {offset = {0.54, -0.27}, zoom = 3, font = 'default-large'},
     ['stone-path'] = { offset = { 0.52, -0.28 }, zoom = 3, font = 'default-large-bold' },
@@ -83,6 +96,5 @@ for r = 3, 10, 1 do
     i = i + 1
 end
 Constants.size_of_solving_vector_tables = #Constants.solving_vector_tables
-
 
 return Constants

@@ -9,9 +9,12 @@ Cell Values:
 
 ]] --
 
+
+--[[
 if script.active_mods['space-age'] then
     error('This map is incompatible with the Space Age mod. Disable Space Age to run this map.', 2)
 end
+]]
 
 local FlyingText = require 'utils.functions.flying_texts'
 
@@ -34,46 +37,40 @@ Global.register(
     end
 )
 
-local function update_rendering(cell, position)
-    local surface = game.surfaces[1]
-    local tile = surface.get_tile(position.x, position.y)
-    local tile_values = Constants.rendering_tile_values[tile.name]
-    if not tile_values then
-        tile_values = { offset = { 0.6, -0.2 }, zoom = 3, font = 'scenario-message-dialog' }
+local function render_cell(cell_key, position)
+    local surface_index = 1
+    local cell = minesweeper.cells[cell_key]
+
+    if not cell then
+        print("Cell not found for rendering at position: " .. cell_key)
+        return
     end
 
-    if cell[2] then
-        cell[2].destroy()
-    end
-    if cell[3] then
-        cell[3].destroy()
-        cell[3] = nil
+    
+
+    if minesweeper.graphical.texts[cell_key] then
+        minesweeper.graphical.texts[cell_key].destroy()
+        minesweeper.graphical.texts[cell_key] = nil
     end
 
-    local cell_value = cell[1]
-
-    local color
-    if Constants.number_colors[cell_value] then
-        color = Constants.number_colors[cell_value]
-    else
-        color = { 125, 125, 125 }
+    if minesweeper.graphical.rectangles[cell_key] then
+        minesweeper.graphical.rectangles[cell_key].destroy()
+        minesweeper.graphical.rectangles[cell_key] = nil
     end
 
-    local p = { position.x + tile_values.offset[1], position.y + tile_values.offset[2] }
-    local text = cell_value
-    if cell_value == 10 or cell_value == 9 then
-        text = ' '
-    end
-    if cell_value == 11 then
-        text = 'X'
-    end
+    local tile_values = Functions.get_text_rendering_at(position, surface_index)
+    local color = Functions.get_cell_color(cell)
+    local text = Functions.get_cell_text(cell)
 
-    cell[2] =
+    local text_position = { position.x + tile_values.offset[1], position.y + tile_values.offset[2] }
+    local surface = game.surfaces[surface_index]
+
+    minesweeper.graphical.texts[cell_key] =
         rendering.draw_text
         {
             text = text,
             surface = surface,
-            target = p,
+            target = text_position,
             color = color,
             scale = tile_values.zoom,
             font = tile_values.font,
@@ -86,7 +83,7 @@ local function update_rendering(cell, position)
         return
     end
 
-    cell[3] =
+    minesweeper.graphical.rectangles[cell_key] =
         rendering.draw_rectangle
         {
             width = 2,
@@ -106,7 +103,7 @@ local function get_adjacent_mine_count(position)
         local p = { x = position.x + vector[1], y = position.y + vector[2] }
         local key = Functions.position_to_string(p)
         local cell = minesweeper.cells[key]
-        if cell and cell[1] >= 10 then
+        if cell and cell >= 10 then
             count = count + 1
         end
     end
@@ -119,22 +116,25 @@ local function kill_cell(position)
     if not cell then
         return
     end
-    if cell[2] then
-        cell[2].destroy()
+    if minesweeper.graphical.texts[key] then
+        minesweeper.graphical.texts[key].destroy()
+        minesweeper.graphical.texts[key] = nil
     end
-    if cell[3] then
-        cell[3].destroy()
+
+    if minesweeper.graphical.rectangles[key] then
+        minesweeper.graphical.rectangles[key].destroy()
+        minesweeper.graphical.rectangles[key] = nil
     end
     minesweeper.cells[key] = nil
 end
 
 local function trigger_mine(cell, position)
-    cell[1] = -1
+    cell = -1
     minesweeper.active_mines = minesweeper.active_mines - 1
     for _, vector in pairs(Constants.cell_update_vectors) do
         local p = { x = position.x + vector[1], y = position.y + vector[2] }
         local adjacent_cell = minesweeper.cells[Functions.position_to_string(p)]
-        if adjacent_cell and adjacent_cell[1] < 10 then
+        if adjacent_cell and adjacent_cell < 10 then
             table.insert(minesweeper.visit_queue, p)
         end
     end
@@ -160,43 +160,36 @@ local function visit_cell(position)
     local cell_value_before_visit = false
 
     if cell then
-        if cell[1] == 10 then
+        if cell == 10 then
             trigger_mine(cell, position)
             return -8
         end
 
-        if cell[1] == 11 then
-            update_rendering(cell, position)
+        if cell == 11 then
+            render_cell(key, position)
             return score_change
         end
 
-        cell_value_before_visit = cell[1]
+        cell_value_before_visit = cell
     end
 
-    if not cell then
-        minesweeper.cells[key] = {}
-    end
-    cell = minesweeper.cells[key]
+    local mine_count = get_adjacent_mine_count(position)
+    minesweeper.cells[key] = mine_count
 
-    cell[1] = get_adjacent_mine_count(position)
-
-    if cell[1] == 0 then
+    if mine_count == 0 then
         for _, vector in pairs(Constants.cell_adjacent_vectors) do
             local adjacent_position = { x = position.x + vector[1], y = position.y + vector[2] }
             if Functions.is_minefield_tile(adjacent_position, true) then
                 local adjacent_key = Functions.position_to_string(adjacent_position)
-                if not minesweeper.cells[adjacent_key] then
-                    minesweeper.cells[adjacent_key] = {}
-                end
                 local adjacent_cell = minesweeper.cells[adjacent_key]
-                local mine_count = get_adjacent_mine_count(adjacent_position)
-                if adjacent_cell[1] ~= mine_count then
-                    adjacent_cell[1] = mine_count
-                    if mine_count == 0 then
-                        table.insert(minesweeper.visit_queue, adjacent_position)
-                    else
-                        update_rendering(adjacent_cell, adjacent_position)
-                    end
+                local adjacent_mine_count = get_adjacent_mine_count(adjacent_position)
+
+                minesweeper.cells[adjacent_key] = adjacent_mine_count
+
+                if adjacent_mine_count == 0 then
+                    table.insert(minesweeper.visit_queue, adjacent_position)
+                else
+                    render_cell(adjacent_key, adjacent_position)
                 end
             end
         end
@@ -205,18 +198,20 @@ local function visit_cell(position)
         return score_change
     end
 
-    if cell_value_before_visit and cell_value_before_visit ~= cell[1] then
+    if cell_value_before_visit and cell_value_before_visit ~= mine_count then
         for _, vector in pairs(Constants.cell_adjacent_vectors) do
             local adjacent_position = { x = position.x + vector[1], y = position.y + vector[2] }
             local adjacent_key = Functions.position_to_string(adjacent_position)
             local adjacent_cell = minesweeper.cells[adjacent_key]
-            if adjacent_cell and adjacent_cell[1] < 9 then
+            if adjacent_cell and adjacent_cell < 9 then
                 table.insert(minesweeper.visit_queue, { x = adjacent_position.x, y = adjacent_position.y })
             end
         end
     end
 
-    update_rendering(cell, position)
+    print("Rendering cell with key: " .. key)
+    -- This should not be called if the cell does not exist.
+    render_cell(key, position)
 
     return score_change
 end
@@ -238,10 +233,10 @@ local function are_mines_marked_around_target(position)
         local key = Functions.position_to_string(p)
         local cell = minesweeper.cells[key]
         if cell then
-            if cell[1] == 10 then
+            if cell == 10 then
                 return
             end
-            if cell[1] == 11 then
+            if cell == 11 then
                 table.insert(marked_positions, p)
             end
         end
@@ -255,12 +250,13 @@ local function solve_attempt(position)
         local p = { x = position.x + vector[1], y = position.y + vector[2] }
         local key = Functions.position_to_string(p)
         local cell = minesweeper.cells[key]
-        if cell and cell[1] > 10 then
+        if cell and cell > 10 then
             local marked_positions = are_mines_marked_around_target(p)
             if marked_positions then
                 solved = true
                 for _, pp in pairs(marked_positions) do
-                    minesweeper.cells[Functions.position_to_string(pp)][1] = -1
+                    local key = Functions.position_to_string(pp)
+                    minesweeper.cells[key] = -1
                     minesweeper.active_mines = minesweeper.active_mines - 1
                 end
                 for _, pp in pairs(marked_positions) do
@@ -273,23 +269,31 @@ local function solve_attempt(position)
     return solved
 end
 
+
+-- TODO: Fix this function to not punish the player for placing a furnace on an already cleared cell (with a number on it). This is not consistent with Minesweeper rules and can lead to confusion. Consider implementing a check to see if the cell is already cleared before applying any penalties.
+-- This seems to punish the player for placing a furnace
+-- on an already cleared cell (with a number on it) which is in proximity to a mine.
+-- It should only do that if the cell that was marked is not cleared yet (unknown), as that is a mistake of the players logic.
+-- Marking an already cleared cell is a missclick and should not be punished with a mine explosion, as that is not consistent with Minesweeper rules and can lead to confusion.
 local function mark_mine(entity, player)
     local position = Functions.position_to_cell_position(entity.position)
     local key = Functions.position_to_string(position)
     local cell = minesweeper.cells[key]
     local score_change = 0
 
-    if cell and cell[1] > 9 then
+
+    -- TODO: If a cell with value 11 is marked, it should instead say "Already marked"
+    if cell and cell > 9 then
         local surface = entity.surface
 
-        if cell[1] == 10 then
+        if cell == 10 then
             score_change = 1
         end
 
         FlyingText.flying_text(nil, surface, entity.position, 'Mine marked.', { r = 0.98, g = 0.66, b = 0.22 })
 
-        cell[1] = 11
-        update_rendering(cell, position)
+        minesweeper.cells[key] = 11
+        render_cell(key, position)
         local stack = { name = 'stone-furnace', count = 1, quality = entity.quality }
         entity.destroy()
 
@@ -309,10 +313,13 @@ local function mark_mine(entity, player)
     end
 
     local triggered_positions = {}
+    -- I do not even know what this is supposed to do?
+    -- Why trigger mines around the entity?
+    -- The bomb should explode where the player made a mistake to communicate this to the player
     for _, vector in pairs(Constants.cell_update_vectors) do
         local p = { x = position.x + vector[1], y = position.y + vector[2] }
         local nearby_cell = minesweeper.cells[Functions.position_to_string(p)]
-        if nearby_cell and nearby_cell[1] == 10 then
+        if nearby_cell and nearby_cell == 10 then
             trigger_mine(nearby_cell, p)
             table.insert(triggered_positions, p)
         end
@@ -360,7 +367,7 @@ local function add_mines_to_chunk(left_top, distance_to_center, restore_existing
         local position = { x = left_top.x + vector[1], y = left_top.y + vector[2] }
         if not Functions.is_spawn(position) and (not restore_existing or Functions.is_minefield_tile(position, true)) then
             local key = Functions.position_to_string(position)
-            minesweeper.cells[key] = { 10 }
+            minesweeper.cells[key] = 10
             minesweeper.active_mines = minesweeper.active_mines + 1
         end
     end
@@ -370,7 +377,7 @@ local function add_mines_to_chunk(left_top, distance_to_center, restore_existing
             local position = { x = x, y = y }
             local key = Functions.position_to_string(position)
             local cell = minesweeper.cells[key]
-            if cell and cell[1] == 10 then
+            if cell and cell == 10 then
                 if get_adjacent_mine_count(position) == 8 then
                     minesweeper.cells[key] = nil
                     minesweeper.active_mines = minesweeper.active_mines - 1
@@ -405,7 +412,7 @@ local function reveal_spawn_area()
         for y = -20, 18, 2 do
             local position = { x = x, y = y }
             local cell = minesweeper.cells[Functions.position_to_string(position)]
-            if cell and cell[1] == 10 and is_cell_near_spawn(position) then
+            if cell and cell == 10 and is_cell_near_spawn(position) then
                 kill_cell(position)
                 minesweeper.active_mines = minesweeper.active_mines - 1
             end
@@ -418,7 +425,7 @@ local function reveal_spawn_area()
         for y = -20, 18, 2 do
             local position = { x = x, y = y }
             local cell = minesweeper.cells[Functions.position_to_string(position)]
-            local is_mine = cell and cell[1] == 10
+            local is_mine = cell and cell == 10
             if not is_mine and is_cell_near_spawn(position) and Functions.is_minefield_tile(position, true) then
                 visit_cell(position)
             end
@@ -554,11 +561,10 @@ local function update_built_tiles(event)
             updated[key] = true
             local cell = minesweeper.cells[key]
             if not cell and Functions.has_paved_minefield_tile(cell_position) then
-                cell = { 9 }
-                minesweeper.cells[key] = cell
+                minesweeper.cells[key] = 9
             end
             if cell then
-                update_rendering(cell, cell_position)
+                render_cell(key, cell_position)
             end
         end
     end
@@ -567,6 +573,7 @@ end
 local function on_player_created(event)
     local player = game.players[event.player_index]
     player.insert({ name = 'stone-furnace', count = 1 })
+    player.set_quick_bar_slot(1, 1, "stone-furnace")
 end
 
 local function on_player_respawned(event)
@@ -606,6 +613,10 @@ local function initialize()
     minesweeper.chunks = {}
     minesweeper.spawn_revealed = false
     minesweeper.cells = {}
+    minesweeper.graphical = {
+        texts = {},
+        rectangles = {}
+    }
     minesweeper.visit_queue = {}
     minesweeper.player_data = {}
     minesweeper.active_mines = 0

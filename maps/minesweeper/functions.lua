@@ -1,20 +1,9 @@
 local FlyingText = require 'utils.functions.flying_texts'
 
 local Public = {}
+local Constants = require 'maps.minesweeper.constants'
 local LootRaffle = require "utils.functions.loot_raffle"
 local Get_noise = require "utils.math.get_noise"
-
-local safe_zone_radius = 16
-
-local ores = {}
-ores[1] = {}
-ores[2] = {}
-for _ = 1, 15, 1 do table.insert(ores[1], "iron-ore") end
-for _ = 1, 9, 1 do table.insert(ores[1], "coal") end
-for _ = 1, 1, 1 do table.insert(ores[1], "crude-oil") end
-for _ = 1, 6, 1 do table.insert(ores[2], "copper-ore") end
-for _ = 1, 4, 1 do table.insert(ores[2], "stone") end
-for _ = 1, 1, 1 do table.insert(ores[2], "uranium-ore") end
 
 local function unstuck_players_around_position(surface, position)
     local area = { { position.x - 2, position.y - 2 }, { position.x + 2, position.y + 2 } }
@@ -28,6 +17,49 @@ local function unstuck_players_around_position(surface, position)
             end
         end
     end
+end
+
+function Public.get_cell_color(value)
+    local color = Constants.number_colors[value]
+    if color then return color end
+
+    return Constants.default_color
+end
+
+function Public.get_cell_text(value)
+    if value == 9 then return " " end
+    if value == 10 then return " " end
+    if value == 11 then return "X" end
+
+    return tostring(value)
+end
+
+function Public.get_text_rendering_at(position, surface_index)
+    local cell_position = Public.position_to_cell_position(position, surface_index)
+
+    surface_index = surface_index or 1
+    local surface = game.surfaces[surface_index]
+
+
+    local tile = surface.get_tile(cell_position.x, cell_position.y)
+
+    -- Find the 3 other tiles in the 2x2 area to determine if they are all the same tile type
+    local tiles = surface.find_tiles_filtered({
+        area = { { cell_position.x, cell_position.y }, { cell_position.x + 2, cell_position.y + 2} },
+        name = tile.name
+    })
+
+    -- Either there are no other tiles or they are of a different type.
+    if #tiles < 4 then
+        return Constants.rendering_tile_values['default']
+    end
+
+    local tile_values = Constants.rendering_tile_values[tile.name]
+    if tile_values then
+        return tile_values
+    end
+
+    return Constants.rendering_tile_values['default']
 end
 
 function Public.kaboom(position, surface_index)
@@ -91,19 +123,19 @@ function Public.has_paved_minefield_tile(position, surface_index)
 end
 
 function Public.is_spawn(position)
-    if math.abs(position.x) > safe_zone_radius then return false end
-    if math.abs(position.y) > safe_zone_radius then return false end
+    if math.abs(position.x) > Constants.safe_zone_radius then return false end
+    if math.abs(position.y) > Constants.safe_zone_radius then return false end
     local p = { x = position.x, y = position.y }
     if p.x > 0 then p.x = p.x + 1 end
     if p.y > 0 then p.y = p.y + 1 end
     local d = math.sqrt(p.x ^ 2 + p.y ^ 2)
-    if d < safe_zone_radius then
+    if d < Constants.safe_zone_radius then
         return true
     end
 end
 
-function Public.position_to_string(p, surface_index)
-    surface_index = surface_index or 1
+function Public.position_to_string(p)
+    local surface_index = p.surface_index or 1
     return p.x .. "_" .. p.y .. "_" .. surface_index
 end
 
@@ -164,9 +196,9 @@ function Public.disarm_reward(position, surface_index)
 
     local ore
     if string.find(tile_name, "grass", 1, true) then
-        ore = ores[1][math.random(1, #ores[1])]
+        ore = Constants.ores[1][math.random(1, #Constants.ores[1])]
     else
-        ore = ores[2][math.random(1, #ores[2])]
+        ore = Constants.ores[2][math.random(1, #Constants.ores[2])]
     end
 
     if ore == "crude-oil" then
