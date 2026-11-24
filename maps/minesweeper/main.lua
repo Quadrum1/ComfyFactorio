@@ -41,22 +41,7 @@ local function render_cell(cell_key, position)
     local surface_index = 1
     local cell = minesweeper.cells[cell_key]
 
-    if not cell then
-        print("Cell not found for rendering at position: " .. cell_key)
-        return
-    end
-
-    
-
-    if minesweeper.graphical.texts[cell_key] then
-        minesweeper.graphical.texts[cell_key].destroy()
-        minesweeper.graphical.texts[cell_key] = nil
-    end
-
-    if minesweeper.graphical.rectangles[cell_key] then
-        minesweeper.graphical.rectangles[cell_key].destroy()
-        minesweeper.graphical.rectangles[cell_key] = nil
-    end
+    if not cell then return end
 
     local tile_values = Functions.get_text_rendering_at(position, surface_index)
     local color = Functions.get_cell_color(cell)
@@ -64,6 +49,11 @@ local function render_cell(cell_key, position)
 
     local text_position = { position.x + tile_values.offset[1], position.y + tile_values.offset[2] }
     local surface = game.surfaces[surface_index]
+
+    if minesweeper.graphical.texts[cell_key] then
+        minesweeper.graphical.texts[cell_key].destroy()
+        minesweeper.graphical.texts[cell_key] = nil
+    end
 
     minesweeper.graphical.texts[cell_key] =
         rendering.draw_text
@@ -79,9 +69,17 @@ local function render_cell(cell_key, position)
             only_in_alt_mode = false
         }
 
-    if not Functions.has_paved_minefield_tile(position) then
+    if not Functions.is_minefield_cell_paved(position, surface_index) then
+        if minesweeper.graphical.rectangles[cell_key] then
+            -- Cell rectangle was rendered before, but now is no longer paved.
+            minesweeper.graphical.rectangles[cell_key].destroy()
+            minesweeper.graphical.rectangles[cell_key] = nil
+        end
         return
     end
+
+    -- Already have a rectangle rendered, no need for more.
+    if minesweeper.graphical.rectangles[cell_key] then return end
 
     minesweeper.graphical.rectangles[cell_key] =
         rendering.draw_rectangle
@@ -209,7 +207,6 @@ local function visit_cell(position)
         end
     end
 
-    print("Rendering cell with key: " .. key)
     -- This should not be called if the cell does not exist.
     render_cell(key, position)
 
@@ -549,9 +546,11 @@ local function on_built_entity(event)
 end
 
 local function update_built_tiles(event)
-    if not minesweeper.cells or event.surface_index ~= 1 then
+    if not minesweeper.cells then
         return
     end
+
+    local surface_index = event.surface_index or 1
 
     local updated = {}
     for _, placed_tile in pairs(event.tiles) do
@@ -560,8 +559,9 @@ local function update_built_tiles(event)
         if not updated[key] then
             updated[key] = true
             local cell = minesweeper.cells[key]
-            if not cell and Functions.has_paved_minefield_tile(cell_position) then
+            if not cell and Functions.is_minefield_cell_paved(cell_position, surface_index) then
                 minesweeper.cells[key] = 9
+                render_cell(key, cell_position)
             end
             if cell then
                 render_cell(key, cell_position)

@@ -118,6 +118,24 @@ function Public.is_minefield_tile(position, search_cell, surface_index)
     return has_minefield_tile(position, search_cell and 1 or 0, false, surface_index)
 end
 
+function Public.is_minefield_cell_paved(position, surface_index)
+    surface_index = surface_index or 1
+    local surface = game.surfaces[surface_index]
+    local cell_position = Public.position_to_cell_position(position, surface_index)
+
+    local tiles = surface.find_tiles_filtered({
+        area = { { cell_position.x, cell_position.y }, { cell_position.x + 2, cell_position.y + 2} },
+        has_hidden_tile = true
+    })
+
+    for _, tile in ipairs(tiles) do
+        if tile.hidden_tile ~= 'nuclear-ground' then
+            return false
+        end
+    end
+    return #tiles > 0
+end
+
 function Public.has_paved_minefield_tile(position, surface_index)
     return has_minefield_tile(position, 1, true, surface_index)
 end
