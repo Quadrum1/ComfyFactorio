@@ -167,7 +167,6 @@ end
 -- check if cell position is at or near spawn by calculating the distance and then giving it a bit of buffer
 function Public.is_near_spawn(position)
     local distance_to_spawn = Public.cell_distance_from_origin(position)
-    print(position.x .. "," .. position.y .. " -> ".. distance_to_spawn)
     if distance_to_spawn < Constants.safe_zone_radius + Constants.safe_zone_buffer then return true end
     return false
 end
