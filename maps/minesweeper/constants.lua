@@ -18,6 +18,11 @@ Normal minesweeper ruloes are used for now.
 local Constants = {}
 
 Constants.safe_zone_radius = 16
+Constants.safe_zone_buffer = 4
+
+Constants.minesweeper_surface = {
+    ["nauvis"] = true
+}
 
 Constants.ores = {}
 Constants.ores[1] = {}

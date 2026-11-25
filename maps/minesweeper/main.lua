@@ -2,6 +2,7 @@
 It's a Minesweeper thingy - MewMew
 
 Cell Values:
+    -- -1 = triggered mine
 	-- 1 to 8 = adjacent mines
 	-- 9 = empty cell with grid
 	-- 10 = mine
@@ -23,7 +24,7 @@ require 'modules.satellite_score'
 local Functions = require 'maps.minesweeper.functions'
 local Constants = require 'maps.minesweeper.constants'
 
-local Map_score = require 'utils.gui.map_score'
+local MapScore = require 'utils.gui.map_score'
 local Map = require 'modules.map_info'
 local Global = require 'utils.global'
 
@@ -154,57 +155,58 @@ local function launch_blast(position)
     end
 end
 
-local function visit_cell(position)
-    local score_change = 0
 
+local function reveal_cell(cell_position)
+    for _, vector in pairs(Constants.cell_adjacent_vectors) do
+        local adjacent_position = { x = cell_position.x + vector[1], y = cell_position.y + vector[2] }
+        if Functions.is_minefield_tile(adjacent_position, true) then
+            local adjacent_key = Functions.position_to_string(adjacent_position)
+            local adjacent_mine_count = get_adjacent_mine_count(adjacent_position)
+
+            minesweeper.cells[adjacent_key] = adjacent_mine_count
+
+            if adjacent_mine_count == 0 then
+                table.insert(minesweeper.visit_queue, adjacent_position)
+            else
+                render_cell(adjacent_key, adjacent_position)
+            end
+        end
+    end
+    Functions.uncover_terrain(cell_position)
+    kill_cell(cell_position)
+end
+
+
+local function visit_cell(position)
     if not Functions.is_minefield_tile(position, true) then
-        return score_change
+        return
     end
 
-    local key = Functions.position_to_string(position)
+    local cell_position = Functions.position_to_cell_position(position)
+    local key = Functions.position_to_string(cell_position)
     local cell = minesweeper.cells[key]
-    local cell_value_before_visit = false
 
     if cell then
         if cell == 10 then
             trigger_mine(key, position)
-            return -8
+            return
         end
 
         if cell == 11 then
             render_cell(key, position)
-            return score_change
+            return
         end
-
-        cell_value_before_visit = cell
     end
 
-    local mine_count = get_adjacent_mine_count(position)
-    minesweeper.cells[key] = mine_count
+    local current_mine_count = get_adjacent_mine_count(cell_position)
+    minesweeper.cells[key] = current_mine_count
 
-    if mine_count == 0 then
-        for _, vector in pairs(Constants.cell_adjacent_vectors) do
-            local adjacent_position = { x = position.x + vector[1], y = position.y + vector[2] }
-            if Functions.is_minefield_tile(adjacent_position, true) then
-                local adjacent_key = Functions.position_to_string(adjacent_position)
-                local adjacent_cell = minesweeper.cells[adjacent_key]
-                local adjacent_mine_count = get_adjacent_mine_count(adjacent_position)
-
-                minesweeper.cells[adjacent_key] = adjacent_mine_count
-
-                if adjacent_mine_count == 0 then
-                    table.insert(minesweeper.visit_queue, adjacent_position)
-                else
-                    render_cell(adjacent_key, adjacent_position)
-                end
-            end
-        end
-        Functions.uncover_terrain(position)
-        kill_cell(position)
-        return score_change
+    if current_mine_count == 0 then
+        reveal_cell(cell_position)
+        return
     end
 
-    if cell_value_before_visit and cell_value_before_visit ~= mine_count then
+    if cell and cell ~= current_mine_count then
         for _, vector in pairs(Constants.cell_adjacent_vectors) do
             local adjacent_position = { x = position.x + vector[1], y = position.y + vector[2] }
             local adjacent_key = Functions.position_to_string(adjacent_position)
@@ -217,8 +219,6 @@ local function visit_cell(position)
 
     -- This should not be called if the cell does not exist.
     render_cell(key, position)
-
-    return score_change
 end
 
 local function are_mines_marked_around_target(position)
@@ -280,88 +280,40 @@ local function mark_mine(entity)
     render_cell(key, position)
 
     if cell == 10 then
-        return 0
+        return 1
     end
 
-    return 1
+    return 0
 end
 
 
--- TODO: Fix this function to not punish the player for placing a furnace on an already cleared cell (with a number on it). This is not consistent with Minesweeper rules and can lead to confusion. Consider implementing a check to see if the cell is already cleared before applying any penalties.
--- This seems to punish the player for placing a furnace
--- on an already cleared cell (with a number on it) which is in proximity to a mine.
--- It should only do that if the cell that was marked is not cleared yet (unknown), as that is a mistake of the players logic.
--- Marking an already cleared cell is a missclick and should not be punished with a mine explosion, as that is not consistent with Minesweeper rules and can lead to confusion.
-local function mark_mine_old(entity)
+-- Handles what should happen when a furnace is placed on a grid cell
+local function handle_marker_on_grid(entity)
     local position = Functions.position_to_cell_position(entity.position)
     local key = Functions.position_to_string(position)
     local cell = minesweeper.cells[key]
 
-    if cell then
-        print("mark_mine_old on cell ".. key .. " with value ".. cell)
-    else
-        print("mark_mine_old on cell ".. key .. " with unknown cell ")
-    end
-    
-
-    -- A cell is known if the value exists
-
+    -- The player managed to diffuse a mine (or a diffused mine :D)
     if cell and cell > 9 then
         local score = mark_mine(entity)
         solve_attempt(position)
         return score
     end
 
-    -- If the cell is known, we can assume this was a mistake
+    -- If the cell is known, i.e. shown, we can assume this was a mistake and not punish it
     if cell then
-        print("Skipped")
         return 0
     end
 
-    -- The player tried to diffuse a cell that was not a mine
+    -- The player tried to diffuse a cell that was not a minew
     -- and was also not yet revealed -> They guessed
     -- Make the cell itself explode and reveal the true value
     -- Maybe add a text later "Your diffusion equipment malfunctioned" ?
-    if not cell then
-        visit_cell(position)
-        launch_blast(position)
-        return
-    end
 
-    local triggered_positions = {}
-    -- I do not even know what this is supposed to do?
-    -- Why trigger mines around the entity?
-    -- The bomb should explode where the player made a mistake on an unknown cell, not on a revealed cell.
-    for _, vector in pairs(Constants.cell_update_vectors) do
-        local p = { x = position.x + vector[1], y = position.y + vector[2] }
-        local nearby_key = Functions.position_to_string(p)
-        local nearby_cell = minesweeper.cells[nearby_key]
-        if nearby_cell and nearby_cell == 10 then
-            trigger_mine(nearby_key, p)
-            table.insert(triggered_positions, p)
-        end
-    end
-    if #triggered_positions > 0 then
-        for _, p in ipairs(triggered_positions) do
-            solve_attempt(p)
-        end
-        for _, p in ipairs(triggered_positions) do
-            launch_blast(p)
-        end
-        return -8 * #triggered_positions
-    end
-end
-
--- check if cell position is at or near spawn by checking if it's neighborhood is a tile of spawn
-local function is_cell_near_spawn(position)
-    for dx = -1, 2, 1 do
-        for dy = -1, 2, 1 do
-            if Functions.is_spawn({ x = position.x + dx, y = position.y + dy }) then
-                return true
-            end
-        end
-    end
-    return false
+    -- To avoid abuse (you can place multiple furnaces before the shockwave reaches you)
+    -- I disabled revealing wrong guesses of non-mines:
+    launch_blast(position)
+    return -1
 end
 
 local function add_mines_to_chunk(left_top, distance_to_center, restore_existing)
@@ -403,48 +355,61 @@ local function add_mines_to_chunk(left_top, distance_to_center, restore_existing
     end
 end
 
--- balance and QoL change: start area is already revealed as if clicked and cleared a free area
--- the previous implementation was not consistent with minesweeper rules
-local function reveal_spawn_area()
-    if minesweeper.spawn_revealed then
+
+local function remove_mines_from_chunk(top_left, surface_index)
+
+    local cell_position = Functions.position_to_cell_position(top_left, surface_index)
+    local chunk_key = Functions.position_to_string(cell_position)
+
+    if not minesweeper.chunks[chunk_key] then
         return
     end
-    local spawn_chunk_keys =
-    {
-        Functions.position_to_string({ x = -32, y = -32 }),
-        Functions.position_to_string({ x = 0, y = -32 }),
-        Functions.position_to_string({ x = -32, y = 0 }),
-        Functions.position_to_string({ x = 0, y = 0 })
-    }
-    for _, chunk_key in pairs(spawn_chunk_keys) do
-        if not minesweeper.chunks[chunk_key] then
-            return
-        end
-    end
-    minesweeper.spawn_revealed = true
 
-    -- remove mines near spawn area, distance can be adjusted by neighborhood range of is_cell_near_spawn check
-    for x = -20, 18, 2 do
-        for y = -20, 18, 2 do
-            local position = { x = x, y = y }
-            local cell = minesweeper.cells[Functions.position_to_string(position)]
-            if cell and cell == 10 and is_cell_near_spawn(position) then
+    for dx = 0, 32, 2 do
+        for dy = 0, 32, 2 do
+            local position = { x = cell_position.x + dx, y = cell_position.y + dy }
+            local key = Functions.position_to_string(position)
+            local cell = minesweeper.cells[key]
+
+            -- Diffuse / Remove mine
+            if cell and cell == 10 and Functions.is_near_spawn(position) then
                 kill_cell(position)
                 minesweeper.active_mines = minesweeper.active_mines - 1
             end
         end
     end
 
-    -- reveal all cells closest to spawn, triggering 0 zones, would not reveal mines if they were still present
-    -- situation is made consistent with minesweeper aestetic, no more hard edge into bomb from "revealed cell"
-    for x = -20, 18, 2 do
-        for y = -20, 18, 2 do
-            local position = { x = x, y = y }
-            local cell = minesweeper.cells[Functions.position_to_string(position)]
+    for dx = 0, 32, 2 do
+        for dy = 0, 32, 2 do
+            local position = { x = cell_position.x + dx, y = cell_position.y + dy }
+            local key = Functions.position_to_string(position)
+            local cell = minesweeper.cells[key]
+
+            -- Diffuse / Remove mine
             local is_mine = cell and cell == 10
-            if not is_mine and is_cell_near_spawn(position) and Functions.is_minefield_tile(position, true) then
+            if not is_mine and Functions.is_near_spawn(position) and Functions.is_minefield_tile(position, true) then
                 visit_cell(position)
             end
+        end
+    end
+end
+
+-- balance and QoL change: start area is already revealed as if clicked and cleared a free area
+-- the previous implementation was not consistent with minesweeper rules
+local function reveal_spawn_area()
+    local spawn_chunks =
+    {
+        { x = -32, y = -32 },
+        { x = 0, y = -32 },
+        { x = -32, y = 0 },
+        { x = 0, y = 0 }
+    }
+
+    -- This should not happen when generate_spawn is called before
+    for _, chunk_left_top in pairs(spawn_chunks) do
+        local key = Functions.position_to_string(chunk_left_top)
+        if minesweeper.chunks[key] then
+            remove_mines_from_chunk(chunk_left_top)
         end
     end
 end
@@ -492,7 +457,6 @@ local function on_chunk_generated(event)
 
     add_mines_to_chunk(left_top, distance_to_center)
     minesweeper.chunks[key] = true
-    reveal_spawn_area()
 end
 
 local function on_player_changed_position(event)
@@ -509,12 +473,16 @@ local function on_player_changed_position(event)
         return
     end
     local cell_position = Functions.position_to_cell_position(position)
-    local score_change = visit_cell(cell_position)
+    local key = Functions.position_to_string(cell_position)
+    local cell = minesweeper.cells[key]
+
+    local score_change = Functions.calculate_cell_step_score(cell)
+    visit_cell(cell_position)
     if score_change < 0 then
         solve_attempt(cell_position)
         launch_blast(cell_position)
     end
-    Map_score.set_score(player, Map_score.get_score(player) + score_change)
+    MapScore.set_score(player, MapScore.get_score(player) + score_change)
 end
 
 
@@ -530,13 +498,13 @@ local function player_built_entity_on_minesweeper_cells(event)
     local fits_cell = position.x % 2 == 1 and position.y % 2 == 1
     
     if is_marker_entity and fits_cell then
-        local score_change = mark_mine_old(entity)
+        local score_change = handle_marker_on_grid(entity)
         if score_change then
-            Map_score.set_score(player, Map_score.get_score(player) + score_change)
+            MapScore.set_score(player, MapScore.get_score(player) + score_change)
         end
     end
 
-    Functions.deny_built_entity(event, player)
+    Functions.refund_and_destroy_entity(entity, player)
 
     -- Reselect the furnace if it was placed down
     if not is_marker_entity then return end
@@ -555,29 +523,17 @@ local function on_robot_built_entity(event)
     if not Functions.is_minefield_tile(position, true) then return end
     
     local inventory = event.robot.get_inventory(defines.inventory.robot_cargo)
-    Functions.deny_built_entity(event, inventory)
+    Functions.refund_and_destroy_entity(entity, inventory)
 end
 
-local function on_built_entity(event)
+local function on_player_built_entity(event)
     local entity = event.entity
     if not minesweeper.cells or not entity.valid or entity.surface.index ~= 1 then
         return
     end
 
-
     local position = entity.position
-    -- bugfix: check all tiles of cell instead of center position
-    -- before mines could spawn near spawn, if mine was marked by furnace, this check would find spawn surface, not a mine
-    -- the furnace would build, the player would mine the furnace and confusedly asume the tile safe
-    -- the player would walk on the tile and be exploded
-    -- even though spawn mines are removed now, this bugfix should still remain, just in case of future changes
-
-    -- This current solution is not optimal
-    -- By placing a 1x1 entity next to nuclear-ground, the position is marked as invalid, even though it is not.
-    -- Conclusion: This is overly cautious
-    local is_marker = entity.name == 'stone-furnace' and position.x % 2 == 1 and position.y % 2 == 1
-    local minefield_position = is_marker and Functions.position_to_cell_position(position) or position
-    if Functions.is_minefield_tile(minefield_position, true) then
+    if Functions.is_minefield_tile(position, true) then
         player_built_entity_on_minesweeper_cells(event)
     end
 end
@@ -611,6 +567,8 @@ local function on_player_created(event)
     local player = game.players[event.player_index]
     player.insert({ name = 'stone-furnace', count = 1 })
     player.set_quick_bar_slot(1, 1, "stone-furnace")
+
+    MapScore.set_score(player, 0)
 end
 
 local function on_player_respawned(event)
@@ -620,21 +578,18 @@ local function on_player_respawned(event)
     game.surfaces[1].destroy_decoratives({ name = 'nuclear-ground-patch' })
 end
 
+-- This revives biters that were killed using nukes
 local function on_entity_died(event)
     local entity = event.entity
-    if not entity.valid then
-        return
-    end
-    if entity.surface.index ~= 1 or entity.force.name ~= 'enemy' then
-        return
-    end
+    if not entity then return end
+    if not entity.valid then return end
+    if entity.surface.index ~= 1 then return end
+    if entity.force.name ~= 'enemy' then return end
+
     local force = event.force
-    if not force then
-        return
-    end
-    if force.name ~= 'minesweeper' then
-        return
-    end
+    if not force then return end
+    if force.name ~= 'minesweeper' then return end
+
     local revived_entity = entity.clone({ position = entity.position })
     if revived_entity then
         revived_entity.health = revived_entity.max_health
@@ -648,12 +603,13 @@ local function initialize()
     end
 
     minesweeper.chunks = {}
-    minesweeper.spawn_revealed = false
     minesweeper.cells = {}
     minesweeper.graphical = {
         texts = {},
         rectangles = {}
     }
+    minesweeper.blasts = {}
+    minesweeper.priority_function_queue = {}
     minesweeper.visit_queue = {}
     minesweeper.player_data = {}
     minesweeper.active_mines = 0
@@ -671,16 +627,29 @@ local function initialize()
         ['trees'] = { frequency = 4, size = 0.5, richness = 0.1 }
     }
     surface.map_gen_settings = mgs
-    Map_score.set_score_description('Minesweep rank:')
+    MapScore.set_score_description('Minesweep rank:')
     local T = Map.get_map_information()
     T.localised_category = 'minesweeper'
     T.main_caption_color = { r = 255, g = 125, b = 55 }
     T.sub_caption_color = { r = 0, g = 250, b = 150 }
 end
 
+local function generate_spawn()
+    local surface = game.surfaces[1]
+    surface.request_to_generate_chunks({ 0, 0 }, 1)
+    surface.force_generate_chunk_requests()
+    for chunk in surface.get_chunks() do
+        if surface.is_chunk_generated(chunk) then
+            on_chunk_generated({ surface = surface, area = chunk.area })
+        end
+    end
+end
+
 local function on_init()
     initialize()
-    minesweeper.generate_spawn = true
+    table.insert(minesweeper.priority_function_queue, generate_spawn)
+    table.insert(minesweeper.priority_function_queue, reveal_spawn_area)
+
     local surface = game.surfaces[1]
     for _, entity in pairs(surface.find_entities_filtered({ type = 'cliff' })) do
         entity.destroy()
@@ -688,33 +657,14 @@ local function on_init()
 end
 
 local function on_nth_tick()
-    if minesweeper.generate_spawn then
-        minesweeper.generate_spawn = nil
-        local surface = game.surfaces[1]
-        surface.request_to_generate_chunks({ 0, 0 }, 1)
-        surface.force_generate_chunk_requests()
-        for chunk in surface.get_chunks() do
-            if surface.is_chunk_generated(chunk) then
-                on_chunk_generated({ surface = surface, area = chunk.area })
-            end
-        end
-    end
-    if not minesweeper.chunks then
-        initialize()
-        local surface = game.surfaces[1]
-        for chunk in surface.get_chunks() do
-            if surface.is_chunk_generated(chunk) then
-                local left_top = chunk.area.left_top
-                local distance_to_center = math.sqrt((left_top.x + 16) ^ 2 + (left_top.y + 16) ^ 2)
-                add_mines_to_chunk(left_top, distance_to_center, true)
-                minesweeper.chunks[Functions.position_to_string(left_top)] = true
-            end
-        end
-        reveal_spawn_area()
+    if #minesweeper.priority_function_queue > 0 then
+        local priority_function = table.remove(minesweeper.priority_function_queue, 1)
+        priority_function()
+        return
     end
 
     local blasts = minesweeper.blasts
-    if blasts then
+    if #blasts > 0 then
         for index = #blasts, 1, -1 do
             local blast = blasts[index]
             if not blast.projectile.valid then
@@ -725,12 +675,13 @@ local function on_nth_tick()
         if #blasts > 0 then
             return
         end
-        minesweeper.blasts = nil
     end
 
-    local position = table.remove(minesweeper.visit_queue, 1)
-    if position then
-        visit_cell(position)
+    if #minesweeper.visit_queue > 0 then
+        local position = table.remove(minesweeper.visit_queue, 1)
+        if position then
+            visit_cell(position)
+        end
     end
 end
 
@@ -739,7 +690,7 @@ Event.on_init(on_init)
 Event.on_nth_tick(2, on_nth_tick)
 Event.add(defines.events.on_chunk_generated, on_chunk_generated)
 Event.add(defines.events.on_player_changed_position, on_player_changed_position)
-Event.add(defines.events.on_built_entity, on_built_entity)
+Event.add(defines.events.on_built_entity, on_player_built_entity)
 Event.add(defines.events.on_robot_built_entity, on_robot_built_entity)
 Event.add(defines.events.on_entity_died, on_entity_died)
 Event.add(defines.events.on_player_created, on_player_created)

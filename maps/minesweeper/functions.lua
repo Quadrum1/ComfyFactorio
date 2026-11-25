@@ -140,6 +140,18 @@ function Public.has_paved_minefield_tile(position, surface_index)
     return has_minefield_tile(position, 1, true, surface_index)
 end
 
+function Public.distance(position1, position2)
+    local dx = position1.x - position2.x
+    local dy = position1.y - position2.y
+    return math.sqrt(dx*dx + dy*dy)
+end
+
+function Public.cell_distance_from_origin(cell_position)
+    local x = cell_position.x + 1
+    local y = cell_position.y + 1
+    return Public.distance({x=x, y=y}, {x=0, y=0})
+end
+
 function Public.is_spawn(position)
     if math.abs(position.x) > Constants.safe_zone_radius then return false end
     if math.abs(position.y) > Constants.safe_zone_radius then return false end
@@ -150,6 +162,14 @@ function Public.is_spawn(position)
     if d < Constants.safe_zone_radius then
         return true
     end
+end
+
+-- check if cell position is at or near spawn by calculating the distance and then giving it a bit of buffer
+function Public.is_near_spawn(position)
+    local distance_to_spawn = Public.cell_distance_from_origin(position)
+    print(position.x .. "," .. position.y .. " -> ".. distance_to_spawn)
+    if distance_to_spawn < Constants.safe_zone_radius + Constants.safe_zone_buffer then return true end
+    return false
 end
 
 function Public.position_to_string(p)
@@ -273,6 +293,12 @@ function Public.get_cell_minecount(cell)
     return 0
 end
 
+-- Calculates the score that a player gets when stepping on a cell
+function Public.calculate_cell_step_score(cell_value)
+    if cell_value == 10 then return -8 end
+    return 0
+end
+
 
 -- Returns count of spilled items
 function Public.return_item_to_inventory_or_spill(inventory, stack, position)
@@ -288,9 +314,9 @@ function Public.return_item_to_inventory_or_spill(inventory, stack, position)
     return spill_count
 end
 
-function Public.deny_built_entity(event, return_inventory)
-    local entity = event.entity
+function Public.refund_and_destroy_entity(entity, return_inventory)
     if not entity then return end
+    if not return_inventory then return end
 
     local items = entity.prototype.items_to_place_this
     if not items or not items[1] then
