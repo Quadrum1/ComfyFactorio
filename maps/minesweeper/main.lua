@@ -138,7 +138,7 @@ local function trigger_mine(cell_key, position, surface_index)
     minesweeper.cells[cell_key] = -1
     minesweeper.active_mines = minesweeper.active_mines - 1
     for _, vector in pairs(Constants.cell_update_vectors) do
-        local p = { x = cell_position.x + vector[1], y = cell_position.y + vector[2] }
+        local p = { x = cell_position.x + vector[1], y = cell_position.y + vector[2], surface_index = cell_position.surface_index }
         local adjacent_key = Functions.position_to_string(p)
         local adjacent_cell = minesweeper.cells[adjacent_key]
         if adjacent_cell and adjacent_cell < 10 then
@@ -158,7 +158,7 @@ end
 
 local function reveal_cell(cell_position)
     for _, vector in pairs(Constants.cell_adjacent_vectors) do
-        local adjacent_position = { x = cell_position.x + vector[1], y = cell_position.y + vector[2] }
+        local adjacent_position = { x = cell_position.x + vector[1], y = cell_position.y + vector[2], surface_index = cell_position.surface_index }
         if Functions.is_minefield_tile(adjacent_position, true) then
             local adjacent_key = Functions.position_to_string(adjacent_position)
             local adjacent_mine_count = get_adjacent_mine_count(adjacent_position)
@@ -212,7 +212,7 @@ local function visit_cell(position)
             local adjacent_key = Functions.position_to_string(adjacent_position)
             local adjacent_cell = minesweeper.cells[adjacent_key]
             if adjacent_cell and adjacent_cell < 9 then
-                table.insert(minesweeper.visit_queue, { x = adjacent_position.x, y = adjacent_position.y })
+                table.insert(minesweeper.visit_queue, { x = adjacent_position.x, y = adjacent_position.y, surface_index = cell_position.surface_index})
             end
         end
     end
@@ -388,64 +388,30 @@ local function remove_mines_from_chunk(top_left, surface_index)
             -- Diffuse / Remove mine
             local is_mine = cell and cell == 10
             if not is_mine and Functions.is_near_spawn(position) and Functions.is_minefield_tile(position, true) then
+                -- TODO
                 visit_cell(position)
             end
         end
     end
 end
 
--- balance and QoL change: start area is already revealed as if clicked and cleared a free area
--- the previous implementation was not consistent with minesweeper rules
-local function reveal_spawn_area()
-    local spawn_chunks =
-    {
-        { x = -32, y = -32 },
-        { x = 0, y = -32 },
-        { x = -32, y = 0 },
-        { x = 0, y = 0 }
-    }
-
-    -- This should not happen when generate_spawn is called before
-    for _, chunk_left_top in pairs(spawn_chunks) do
-        local key = Functions.position_to_string(chunk_left_top)
-        if minesweeper.chunks[key] then
-            remove_mines_from_chunk(chunk_left_top)
-        end
-    end
-end
-
 local function on_chunk_generated(event)
-    local left_top = event.area.left_top
-    local surface = event.surface
-    if surface.index ~= 1 or not minesweeper.chunks then
-        return
-    end
+    if not minesweeper.chunks then return end
 
+    local surface = event.surface
+    if not Functions.is_minesweeper_planet(surface.index) then return end
+
+    local left_top = event.area.left_top
     local key = Functions.position_to_string(left_top)
-    if minesweeper.chunks[key] then
-        return
-    end
+    if minesweeper.chunks[key] then return end
 
     local distance_to_center = math.sqrt((left_top.x + 16) ^ 2 + (left_top.y + 16) ^ 2)
     local tiles = {}
 
-    if distance_to_center < 128 then
-        for x = 0, 31, 1 do
-            for y = 0, 31, 1 do
-                local position = { x = left_top.x + x, y = left_top.y + y }
-                if Functions.is_spawn(position) then
-                    table.insert(tiles, { name = Functions.get_terrain_tile(surface, position), position = position })
-                else
-                    table.insert(tiles, { name = 'nuclear-ground', position = position })
-                end
-            end
-        end
-    else
-        for x = 0, 31, 1 do
-            for y = 0, 31, 1 do
-                local position = { x = left_top.x + x, y = left_top.y + y }
-                table.insert(tiles, { name = 'nuclear-ground', position = position })
-            end
+    for x = 0, 31, 1 do
+        for y = 0, 31, 1 do
+            local position = { x = left_top.x + x, y = left_top.y + y }
+            table.insert(tiles, { name = 'nuclear-ground', position = position })
         end
     end
     surface.set_tiles(tiles, true)
@@ -460,24 +426,26 @@ local function on_chunk_generated(event)
 end
 
 local function on_player_changed_position(event)
+    if not minesweeper.cells then return end
+
     local player = game.players[event.player_index]
+    if player.controller_type ~= defines.controllers.character then return end
+
     -- change for 2.0 | 2.1
     -- player.position also gives position in remote view which would trigger mines before
     -- instead use character.position
     local character = player.character
-    if not minesweeper.cells or player.controller_type ~= defines.controllers.character or not (character and character.valid) or character.surface.index ~= 1 then
-        return
-    end
+    if not character or not character.valid then return end
+
     local position = character.position
-    if not Functions.is_minefield_tile(position) then
-        return
-    end
+    if not Functions.is_minefield_tile(position) then return end
+
     local cell_position = Functions.position_to_cell_position(position)
     local key = Functions.position_to_string(cell_position)
     local cell = minesweeper.cells[key]
 
-    local score_change = Functions.calculate_cell_step_score(cell)
     visit_cell(cell_position)
+    local score_change = Functions.calculate_cell_step_score(cell)
     if score_change < 0 then
         solve_attempt(cell_position)
         launch_blast(cell_position)
@@ -597,6 +565,70 @@ local function on_entity_died(event)
     end
 end
 
+local function generate_spawn(surface_index)
+    surface_index = surface_index or 1
+    local surface = game.surfaces[surface_index]
+    surface.request_to_generate_chunks({ 0, 0 }, surface_index)
+    surface.force_generate_chunk_requests()
+    for chunk in surface.get_chunks() do
+        if surface.is_chunk_generated(chunk) then
+            on_chunk_generated({ surface = surface, area = chunk.area })
+        end
+    end
+end
+
+-- balance and QoL change: start area is already revealed as if clicked and cleared a free area
+-- the previous implementation was not consistent with minesweeper rules
+local function reveal_spawn_area(surface_index)
+    surface_index = surface_index or 1
+    if not Functions.is_minesweeper_planet(surface_index) then return end
+
+    local surface = game.surfaces[surface_index]
+    local planet = surface.planet
+    if not planet then return end
+    local spawn_chunks =
+    {
+        { x = -32, y = -32 },
+        { x = 0, y = -32 },
+        { x = -32, y = 0 },
+        { x = 0, y = 0 }
+    }
+    
+    local spawn_tile = Constants.spawn_surface_material[planet.name]
+    
+    -- This should not happen when generate_spawn is called before
+    local tiles = {}
+
+    for _, chunk_left_top in pairs(spawn_chunks) do
+        for x = 0, 31, 1 do
+            for y = 0, 31, 1 do
+                local position = { x = chunk_left_top.x + x, y = chunk_left_top.y + y }
+                if Functions.is_spawn(position) then
+                    table.insert(tiles, { name = spawn_tile, position = position })
+                end
+            end
+        end
+    end
+    surface.set_tiles(tiles, true, true)
+
+    for _, chunk_left_top in pairs(spawn_chunks) do
+        local key = Functions.position_to_string(chunk_left_top)
+        if minesweeper.chunks[key] then
+            game.print("Removing chunk mines: ".. key)
+            remove_mines_from_chunk(chunk_left_top)
+        end
+        
+    end
+end
+
+local function on_surface_created(event)
+    local surface_index = event.surface_index
+    if not Functions.is_minesweeper_planet(surface_index) then return end
+
+    generate_spawn(surface_index)
+    reveal_spawn_area(surface_index)
+end
+
 local function initialize()
     if not game.forces.minesweeper then
         game.create_force('minesweeper')
@@ -626,6 +658,7 @@ local function initialize()
     {
         ['trees'] = { frequency = 4, size = 0.5, richness = 0.1 }
     }
+
     surface.map_gen_settings = mgs
     MapScore.set_score_description('Minesweep rank:')
     local T = Map.get_map_information()
@@ -634,23 +667,13 @@ local function initialize()
     T.sub_caption_color = { r = 0, g = 250, b = 150 }
 end
 
-local function generate_spawn()
-    local surface = game.surfaces[1]
-    surface.request_to_generate_chunks({ 0, 0 }, 1)
-    surface.force_generate_chunk_requests()
-    for chunk in surface.get_chunks() do
-        if surface.is_chunk_generated(chunk) then
-            on_chunk_generated({ surface = surface, area = chunk.area })
-        end
-    end
-end
-
 local function on_init()
     initialize()
     table.insert(minesweeper.priority_function_queue, generate_spawn)
     table.insert(minesweeper.priority_function_queue, reveal_spawn_area)
 
     local surface = game.surfaces[1]
+
     for _, entity in pairs(surface.find_entities_filtered({ type = 'cliff' })) do
         entity.destroy()
     end
@@ -677,6 +700,7 @@ local function on_nth_tick()
         end
     end
 
+    -- TODO: There should be a check to not have duplicates in here
     if #minesweeper.visit_queue > 0 then
         local position = table.remove(minesweeper.visit_queue, 1)
         if position then
@@ -688,6 +712,7 @@ end
 local Event = require 'utils.event'
 Event.on_init(on_init)
 Event.on_nth_tick(2, on_nth_tick)
+Event.add(defines.events.on_surface_created, on_surface_created)
 Event.add(defines.events.on_chunk_generated, on_chunk_generated)
 Event.add(defines.events.on_player_changed_position, on_player_changed_position)
 Event.add(defines.events.on_built_entity, on_player_built_entity)

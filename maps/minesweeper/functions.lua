@@ -185,8 +185,6 @@ function Public.position_to_cell_position(p, surface_index)
 end
 
 function Public.get_terrain_tile(surface, position)
-    if Public.is_spawn(position) then return 'black-refined-concrete' end
-
     local seed = surface.map_gen_settings.seed
 
     local noise_1 = Get_noise("smol_areas", position, seed)
@@ -334,7 +332,7 @@ function Public.select_furnace(player)
     player.pipette(prototypes.item["stone-furnace"])
 end
 
- function Public.get_solving_vectors(position)
+function Public.get_solving_vectors(position)
     local distance_to_center = math.sqrt(position.x ^ 2 + position.y ^ 2)
     local key = math.floor(distance_to_center * 0.005) + 1
     if key > Constants.size_of_solving_vector_tables then
@@ -342,6 +340,15 @@ end
     end
     local solving_vectors = Constants.solving_vector_tables[key]
     return solving_vectors
+end
+
+function Public.is_minesweeper_planet(surface_index)
+    local surface = game.surfaces[surface_index]
+    local planet = surface.planet
+
+    if not planet then return false end
+    
+    return Constants.allowed_minesweeper_planets[planet.name]
 end
 
 return Public

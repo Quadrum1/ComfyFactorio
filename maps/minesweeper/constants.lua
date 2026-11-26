@@ -20,9 +20,20 @@ local Constants = {}
 Constants.safe_zone_radius = 16
 Constants.safe_zone_buffer = 4
 
-Constants.minesweeper_surface = {
-    ["nauvis"] = true
+
+
+Constants.spawn_surface_material = {
+    ["nauvis"] = "black-refined-concrete",
+    ["vulcanus"] = "red-refined-concrete",
+    ["fulgora"] = "blue-refined-concrete",
+    ["gleba"] = "green-refined-concrete",
+    ["aquilo"] = "purple-refined-concrete"
 }
+
+Constants.allowed_minesweeper_planets = {}
+for planet, _ in pairs(Constants.spawn_surface_material) do
+    Constants.allowed_minesweeper_planets[planet] = true
+end
 
 Constants.ores = {}
 Constants.ores[1] = {}
