@@ -63,7 +63,6 @@ function Public.get_text_rendering_at(position, surface_index)
 end
 
 function Public.kaboom(position, surface_index)
-    surface_index = surface_index or 1
     local surface = game.surfaces[surface_index]
     local count = surface.count_entities_filtered({ name = { "atomic-bomb-ground-zero-projectile", "atomic-bomb-wave", "atomic-bomb-wave-spawns-cluster-nuke-explosion", "atomic-bomb-wave-spawns-fire-smoke-explosion", "atomic-bomb-wave-spawns-nuclear-smoke", "atomic-bomb-wave-spawns-nuke-shockwave-explosion", "atomic-rocket" }, area = { { position.x - 4, position.y - 4 }, { position.x + 4, position.y + 4 } }, limit = 1 })
     if count > 0 then return end
@@ -72,28 +71,22 @@ function Public.kaboom(position, surface_index)
     local area = { { center.x - 13, center.y - 13 }, { center.x + 13, center.y + 13 } }
     local terrain = {}
     for _, tile in pairs(surface.find_tiles_filtered({ area = area })) do
-        if tile.name ~= 'nuclear-ground' and tile.name ~= 'out-of-map' then
+        if tile.name ~= 'out-of-map' then
             terrain[#terrain + 1] = { name = tile.name, position = tile.position, hidden = tile.hidden_tile, double_hidden = tile.double_hidden_tile }
         end
     end
     local projectile = surface.create_entity({ name = 'atomic-rocket', position = center, target = center, speed = 1, force = 'minesweeper' })
     if projectile then
-        return { projectile = projectile, terrain = terrain }
+        return { projectile = projectile, terrain = terrain, surface_index = surface_index}
     end
 end
 
 function Public.restore_blast_terrain(terrain, surface_index)
     surface_index = surface_index or 1
     local surface = game.surfaces[surface_index]
-    local tiles = {}
-    for _, tile in ipairs(terrain) do
-        if surface.get_tile(tile.position).name == 'nuclear-ground' then
-            tiles[#tiles + 1] = tile
-        end
-    end
-    if #tiles > 0 then
-        surface.set_tiles(tiles, true, false, false)
-        for _, tile in ipairs(tiles) do
+    if #terrain > 0 then
+        surface.set_tiles(terrain, true, false, false)
+        for _, tile in ipairs(terrain) do
             surface.set_hidden_tile(tile.position, tile.hidden)
             surface.set_double_hidden_tile(tile.position, tile.double_hidden)
         end
@@ -176,6 +169,8 @@ function Public.position_to_string(p)
     return p.x .. "_" .. p.y .. "_" .. surface_index
 end
 
+
+-- A better name would be snap_to_nearest_even without a surface_index required
 function Public.position_to_cell_position(p, surface_index)
     local cell_position = {}
     cell_position.x = math.floor(p.x * 0.5) * 2
@@ -349,6 +344,15 @@ function Public.is_minesweeper_planet(surface_index)
     if not planet then return false end
     
     return Constants.allowed_minesweeper_planets[planet.name]
+end
+
+
+function Public.revive_entity(entity)
+    local revived_entity = entity.clone({ position = entity.position })
+    if revived_entity then
+        revived_entity.health = revived_entity.max_health
+        entity.destroy()
+    end
 end
 
 return Public

@@ -38,8 +38,15 @@ Global.register(
     end
 )
 
-local function render_cell(cell_key, position)
-    local surface_index = 1
+local function error_missing_surface()
+    error("You have not provided a surface_index")
+end
+
+local function render_cell(position, surface_index)
+    if not surface_index then error_missing_surface() end
+
+    local cell_position = Functions.position_to_cell_position(position, surface_index)
+    local cell_key = Functions.position_to_string(cell_position)
     local cell = minesweeper.cells[cell_key]
 
     if not cell then return end
@@ -97,13 +104,13 @@ local function render_cell(cell_key, position)
 end
 
 local function get_adjacent_mine_count(position, surface_index)
-    surface_index = surface_index or 1
-    local cell_position = Functions.position_to_cell_position(position, surface_index)
+    if not surface_index then error_missing_surface() end
     
     local count = 0
     for _, vector in pairs(Constants.cell_adjacent_vectors) do
-        local p = { x = cell_position.x + vector[1], y = cell_position.y + vector[2] }
-        local key = Functions.position_to_string(p)
+        local position = { x = position.x + vector[1], y = position.y + vector[2] }
+        local cell_position = Functions.position_to_cell_position(position, surface_index)
+        local key = Functions.position_to_string(cell_position)
         local cell = minesweeper.cells[key]
 
         count = count + Functions.get_cell_minecount(cell)
@@ -112,7 +119,7 @@ local function get_adjacent_mine_count(position, surface_index)
 end
 
 local function kill_cell(position, surface_index)
-    surface_index = surface_index or 1
+    if not surface_index then error_missing_surface() end
     local cell_position = Functions.position_to_cell_position(position, surface_index)
     local key = Functions.position_to_string(cell_position)
     local cell = minesweeper.cells[key]
@@ -131,24 +138,26 @@ local function kill_cell(position, surface_index)
     minesweeper.cells[key] = nil
 end
 
-local function trigger_mine(cell_key, position, surface_index)
-    surface_index = surface_index or 1
+local function trigger_mine(position, surface_index)
+    if not surface_index then error_missing_surface() end
     local cell_position = Functions.position_to_cell_position(position, surface_index)
+    local cell_key = Functions.position_to_string(cell_position)
 
     minesweeper.cells[cell_key] = -1
     minesweeper.active_mines = minesweeper.active_mines - 1
     for _, vector in pairs(Constants.cell_update_vectors) do
-        local p = { x = cell_position.x + vector[1], y = cell_position.y + vector[2], surface_index = cell_position.surface_index }
-        local adjacent_key = Functions.position_to_string(p)
+        local position = { x = cell_position.x + vector[1], y = cell_position.y + vector[2] }
+        local adjacent_cell_position = Functions.position_to_cell_position(position, surface_index)
+        local adjacent_key = Functions.position_to_string(adjacent_cell_position)
         local adjacent_cell = minesweeper.cells[adjacent_key]
         if adjacent_cell and adjacent_cell < 10 then
-            table.insert(minesweeper.visit_queue, p)
+            table.insert(minesweeper.visit_queue, adjacent_cell_position)
         end
     end
 end
 
-local function launch_blast(position)
-    local blast = Functions.kaboom(position)
+local function launch_blast(position, surface_index)
+    local blast = Functions.kaboom(position, surface_index)
     if blast then
         minesweeper.blasts = minesweeper.blasts or {}
         table.insert(minesweeper.blasts, blast)
@@ -156,77 +165,84 @@ local function launch_blast(position)
 end
 
 
-local function reveal_cell(cell_position)
+local function reveal_cell(cell_position, surface_index)
+    if not surface_index then error_missing_surface() end
     for _, vector in pairs(Constants.cell_adjacent_vectors) do
-        local adjacent_position = { x = cell_position.x + vector[1], y = cell_position.y + vector[2], surface_index = cell_position.surface_index }
-        if Functions.is_minefield_tile(adjacent_position, true) then
-            local adjacent_key = Functions.position_to_string(adjacent_position)
-            local adjacent_mine_count = get_adjacent_mine_count(adjacent_position)
+        local adjacent_position = { x = cell_position.x + vector[1], y = cell_position.y + vector[2] }
+        if Functions.is_minefield_tile(adjacent_position, true, surface_index) then
+            local adjacent_cell_position = Functions.position_to_cell_position(adjacent_position, surface_index)
+            local adjacent_key = Functions.position_to_string(adjacent_cell_position)
+            local adjacent_mine_count = get_adjacent_mine_count(adjacent_cell_position, surface_index)
 
             minesweeper.cells[adjacent_key] = adjacent_mine_count
 
             if adjacent_mine_count == 0 then
-                table.insert(minesweeper.visit_queue, adjacent_position)
+                table.insert(minesweeper.visit_queue, adjacent_cell_position)
             else
-                render_cell(adjacent_key, adjacent_position)
+                render_cell(adjacent_cell_position, surface_index)
             end
         end
     end
-    Functions.uncover_terrain(cell_position)
-    kill_cell(cell_position)
+    Functions.uncover_terrain(cell_position, surface_index)
+    kill_cell(cell_position, surface_index)
 end
 
 
-local function visit_cell(position)
-    if not Functions.is_minefield_tile(position, true) then
+local function visit_cell(position, surface_index)
+    if not surface_index then error_missing_surface() end
+    surface_index = surface_index or 1
+
+    if not Functions.is_minefield_tile(position, true, surface_index) then
         return
     end
-
-    local cell_position = Functions.position_to_cell_position(position)
+    
+    local cell_position = Functions.position_to_cell_position(position, surface_index)
     local key = Functions.position_to_string(cell_position)
     local cell = minesweeper.cells[key]
-
     if cell then
         if cell == 10 then
-            trigger_mine(key, position)
+            trigger_mine(position, surface_index)
             return
         end
 
         if cell == 11 then
-            render_cell(key, position)
+            render_cell(position, surface_index)
             return
         end
     end
 
-    local current_mine_count = get_adjacent_mine_count(cell_position)
+    local current_mine_count = get_adjacent_mine_count(cell_position, surface_index)
     minesweeper.cells[key] = current_mine_count
 
     if current_mine_count == 0 then
-        reveal_cell(cell_position)
+        reveal_cell(cell_position, surface_index)
         return
     end
 
     if cell and cell ~= current_mine_count then
         for _, vector in pairs(Constants.cell_adjacent_vectors) do
             local adjacent_position = { x = position.x + vector[1], y = position.y + vector[2] }
-            local adjacent_key = Functions.position_to_string(adjacent_position)
+            local adjacent_cell_position = Functions.position_to_cell_position(adjacent_position, surface_index)
+            local adjacent_key = Functions.position_to_string(adjacent_cell_position)
             local adjacent_cell = minesweeper.cells[adjacent_key]
             if adjacent_cell and adjacent_cell < 9 then
-                table.insert(minesweeper.visit_queue, { x = adjacent_position.x, y = adjacent_position.y, surface_index = cell_position.surface_index})
+                table.insert(minesweeper.visit_queue, adjacent_cell_position)
             end
         end
     end
 
     -- This should not be called if the cell does not exist.
-    render_cell(key, position)
+    render_cell(position, surface_index)
 end
 
-local function are_mines_marked_around_target(position)
+local function are_mines_marked_around_target(position, surface_index)
+    if not surface_index then error_missing_surface() end
     local marked_positions = {}
     for _, vector in pairs(Functions.get_solving_vectors(position)) do
         local p = { x = position.x + vector[1], y = position.y + vector[2] }
-        local key = Functions.position_to_string(p)
-        local cell = minesweeper.cells[key]
+        local cell_position = Functions.position_to_cell_position(p, surface_index)
+        local cell_key = Functions.position_to_string(cell_position)
+        local cell = minesweeper.cells[cell_key]
         if cell then
             if cell == 10 then
                 return
@@ -239,24 +255,27 @@ local function are_mines_marked_around_target(position)
     return marked_positions
 end
 
-local function solve_attempt(position)
+local function solve_attempt(position, surface_index)
+    if not surface_index then error_missing_surface() end
     local solved = false
     for _, vector in pairs(Functions.get_solving_vectors(position)) do
         local p = { x = position.x + vector[1], y = position.y + vector[2] }
-        local key = Functions.position_to_string(p)
-        local cell = minesweeper.cells[key]
+        local cell_position = Functions.position_to_cell_position(p, surface_index)
+        local cell_key = Functions.position_to_string(cell_position)
+        local cell = minesweeper.cells[cell_key]
         if cell and cell > 10 then
-            local marked_positions = are_mines_marked_around_target(p)
+            local marked_positions = are_mines_marked_around_target(p, surface_index)
             if marked_positions then
                 solved = true
                 for _, pp in pairs(marked_positions) do
-                    local key = Functions.position_to_string(pp)
-                    minesweeper.cells[key] = -1
+                    local marked_cell_position = Functions.position_to_cell_position(pp, surface_index)
+                    local marked_key = Functions.position_to_string(marked_cell_position)
+                    minesweeper.cells[marked_key] = -1
                     minesweeper.active_mines = minesweeper.active_mines - 1
                 end
                 for _, pp in pairs(marked_positions) do
-                    visit_cell(pp)
-                    Functions.disarm_reward(pp)
+                    visit_cell(pp, surface_index)
+                    Functions.disarm_reward(pp, surface_index)
                 end
             end
         end
@@ -265,9 +284,9 @@ local function solve_attempt(position)
 end
 
 
--- 
 local function mark_mine(entity)
-    local position = Functions.position_to_cell_position(entity.position)
+    local surface_index = entity.surface_index
+    local position = Functions.position_to_cell_position(entity.position, surface_index)
     local key = Functions.position_to_string(position)
     local cell = minesweeper.cells[key]
 
@@ -277,7 +296,7 @@ local function mark_mine(entity)
     FlyingText.flying_text(nil, surface, entity.position, config.text, config.color)  
 
     minesweeper.cells[key] = 11
-    render_cell(key, position)
+    render_cell(position, surface_index)
 
     if cell == 10 then
         return 1
@@ -289,14 +308,15 @@ end
 
 -- Handles what should happen when a furnace is placed on a grid cell
 local function handle_marker_on_grid(entity)
-    local position = Functions.position_to_cell_position(entity.position)
+    local surface_index = entity.surface_index
+    local position = Functions.position_to_cell_position(entity.position, surface_index)
     local key = Functions.position_to_string(position)
     local cell = minesweeper.cells[key]
 
     -- The player managed to diffuse a mine (or a diffused mine :D)
     if cell and cell > 9 then
         local score = mark_mine(entity)
-        solve_attempt(position)
+        solve_attempt(position, surface_index)
         return score
     end
 
@@ -312,11 +332,11 @@ local function handle_marker_on_grid(entity)
 
     -- To avoid abuse (you can place multiple furnaces before the shockwave reaches you)
     -- I disabled revealing wrong guesses of non-mines:
-    launch_blast(position)
+    launch_blast(position, surface_index)
     return -1
 end
 
-local function add_mines_to_chunk(left_top, distance_to_center, restore_existing)
+local function add_mines_to_chunk(left_top, distance_to_center, surface_index)
     local base_mine_count = 40
     local max_mine_count = 128
     local mine_count = distance_to_center * 0.043 + base_mine_count
@@ -333,8 +353,9 @@ local function add_mines_to_chunk(left_top, distance_to_center, restore_existing
     for iv = 1, mine_count do
         local vector = Constants.chunk_divide_vectors[shuffle_index[iv]]
         local position = { x = left_top.x + vector[1], y = left_top.y + vector[2] }
-        if not Functions.is_spawn(position) and (not restore_existing or Functions.is_minefield_tile(position, true)) then
-            local key = Functions.position_to_string(position)
+        if not Functions.is_spawn(position) then
+            local cell_position = Functions.position_to_cell_position(position, surface_index)
+            local key = Functions.position_to_string(cell_position)
             minesweeper.cells[key] = 10
             minesweeper.active_mines = minesweeper.active_mines + 1
         end
@@ -343,10 +364,11 @@ local function add_mines_to_chunk(left_top, distance_to_center, restore_existing
     for x = left_top.x - 2, left_top.x + 32, 2 do
         for y = left_top.y - 2, left_top.y + 32, 2 do
             local position = { x = x, y = y }
-            local key = Functions.position_to_string(position)
+            local cell_position = Functions.position_to_cell_position(position, surface_index)
+            local key = Functions.position_to_string(cell_position)
             local cell = minesweeper.cells[key]
             if cell and cell == 10 then
-                if get_adjacent_mine_count(position) == 8 then
+                if get_adjacent_mine_count(position, surface_index) == 8 then
                     minesweeper.cells[key] = nil
                     minesweeper.active_mines = minesweeper.active_mines - 1
                 end
@@ -368,12 +390,13 @@ local function remove_mines_from_chunk(top_left, surface_index)
     for dx = 0, 32, 2 do
         for dy = 0, 32, 2 do
             local position = { x = cell_position.x + dx, y = cell_position.y + dy }
-            local key = Functions.position_to_string(position)
+            local tile_cell_position = Functions.position_to_cell_position(position, surface_index)
+            local key = Functions.position_to_string(tile_cell_position)
             local cell = minesweeper.cells[key]
 
             -- Diffuse / Remove mine
-            if cell and cell == 10 and Functions.is_near_spawn(position) then
-                kill_cell(position)
+            if cell and cell == 10 and Functions.is_near_spawn(tile_cell_position) then
+                kill_cell(tile_cell_position, surface_index)
                 minesweeper.active_mines = minesweeper.active_mines - 1
             end
         end
@@ -382,14 +405,14 @@ local function remove_mines_from_chunk(top_left, surface_index)
     for dx = 0, 32, 2 do
         for dy = 0, 32, 2 do
             local position = { x = cell_position.x + dx, y = cell_position.y + dy }
-            local key = Functions.position_to_string(position)
+            local tile_cell_position = Functions.position_to_cell_position(position, surface_index)
+            local key = Functions.position_to_string(tile_cell_position)
             local cell = minesweeper.cells[key]
 
             -- Diffuse / Remove mine
             local is_mine = cell and cell == 10
-            if not is_mine and Functions.is_near_spawn(position) and Functions.is_minefield_tile(position, true) then
-                -- TODO
-                visit_cell(position)
+            if not is_mine and Functions.is_near_spawn(tile_cell_position) and Functions.is_minefield_tile(tile_cell_position, true, surface_index) then
+                visit_cell(tile_cell_position, surface_index)
             end
         end
     end
@@ -399,18 +422,20 @@ local function on_chunk_generated(event)
     if not minesweeper.chunks then return end
 
     local surface = event.surface
-    if not Functions.is_minesweeper_planet(surface.index) then return end
+    local surface_index = surface.index
+    if not Functions.is_minesweeper_planet(surface_index) then return end
 
     local left_top = event.area.left_top
-    local key = Functions.position_to_string(left_top)
+    local cell_position = Functions.position_to_cell_position(left_top, surface_index)
+    local key = Functions.position_to_string(cell_position)
     if minesweeper.chunks[key] then return end
-
-    local distance_to_center = math.sqrt((left_top.x + 16) ^ 2 + (left_top.y + 16) ^ 2)
+    --game.print("Chunking " .. key )
+    local distance_to_center = math.sqrt((cell_position.x + 16) ^ 2 + (cell_position.y + 16) ^ 2)
     local tiles = {}
 
     for x = 0, 31, 1 do
         for y = 0, 31, 1 do
-            local position = { x = left_top.x + x, y = left_top.y + y }
+            local position = { x = cell_position.x + x, y = cell_position.y + y }
             table.insert(tiles, { name = 'nuclear-ground', position = position })
         end
     end
@@ -421,7 +446,7 @@ local function on_chunk_generated(event)
         resource.destroy()
     end
 
-    add_mines_to_chunk(left_top, distance_to_center)
+    add_mines_to_chunk(left_top, distance_to_center, surface_index)
     minesweeper.chunks[key] = true
 end
 
@@ -438,17 +463,19 @@ local function on_player_changed_position(event)
     if not character or not character.valid then return end
 
     local position = character.position
-    if not Functions.is_minefield_tile(position) then return end
+    local surface_index = character.surface_index
+    if not Functions.is_minefield_tile(position, false, surface_index) then return end
 
-    local cell_position = Functions.position_to_cell_position(position)
+    local cell_position = Functions.position_to_cell_position(position, surface_index)
     local key = Functions.position_to_string(cell_position)
     local cell = minesweeper.cells[key]
 
-    visit_cell(cell_position)
+    game.print("Player stepped on tile ".. key)
+    visit_cell(cell_position, surface_index)
     local score_change = Functions.calculate_cell_step_score(cell)
     if score_change < 0 then
-        solve_attempt(cell_position)
-        launch_blast(cell_position)
+        solve_attempt(cell_position, surface_index)
+        launch_blast(cell_position, surface_index)
     end
     MapScore.set_score(player, MapScore.get_score(player) + score_change)
 end
@@ -484,11 +511,12 @@ end
 -- This should probably never be possible to avoid cheesing with huge furnace arrays.
 local function on_robot_built_entity(event)
     local entity = event.entity
-    if not minesweeper.cells or not entity.valid or entity.surface.index ~= 1 then
+    if not minesweeper.cells or not entity.valid then
         return
     end
     local position = entity.position
-    if not Functions.is_minefield_tile(position, true) then return end
+    local surface_index = entity.surface_index
+    if not Functions.is_minefield_tile(position, true, surface_index) then return end
     
     local inventory = event.robot.get_inventory(defines.inventory.robot_cargo)
     Functions.refund_and_destroy_entity(entity, inventory)
@@ -496,12 +524,13 @@ end
 
 local function on_player_built_entity(event)
     local entity = event.entity
-    if not minesweeper.cells or not entity.valid or entity.surface.index ~= 1 then
+    if not minesweeper.cells or not entity.valid then
         return
     end
 
+    local surface_index = entity.surface_index
     local position = entity.position
-    if Functions.is_minefield_tile(position, true) then
+    if Functions.is_minefield_tile(position, true, surface_index) then
         player_built_entity_on_minesweeper_cells(event)
     end
 end
@@ -522,10 +551,10 @@ local function update_built_tiles(event)
             local cell = minesweeper.cells[key]
             if not cell and Functions.is_minefield_cell_paved(cell_position, surface_index) then
                 minesweeper.cells[key] = 9
-                render_cell(key, cell_position)
+                render_cell(cell_position, surface_index)
             end
             if cell then
-                render_cell(key, cell_position)
+                render_cell(cell_position, surface_index)
             end
         end
     end
@@ -548,21 +577,16 @@ end
 
 -- This revives biters that were killed using nukes
 local function on_entity_died(event)
-    local entity = event.entity
-    if not entity then return end
-    if not entity.valid then return end
-    if entity.surface.index ~= 1 then return end
-    if entity.force.name ~= 'enemy' then return end
-
     local force = event.force
     if not force then return end
     if force.name ~= 'minesweeper' then return end
 
-    local revived_entity = entity.clone({ position = entity.position })
-    if revived_entity then
-        revived_entity.health = revived_entity.max_health
-        entity.destroy()
-    end
+    local entity = event.entity
+    if not entity then return end
+    if not entity.valid then return end
+    if entity.force.name == 'player' then return end
+
+    Functions.revive_entity(entity)
 end
 
 local function generate_spawn(surface_index)
@@ -588,14 +612,14 @@ local function reveal_spawn_area(surface_index)
     if not planet then return end
     local spawn_chunks =
     {
-        { x = -32, y = -32 },
-        { x = 0, y = -32 },
-        { x = -32, y = 0 },
-        { x = 0, y = 0 }
+        { x = -32, y = -32, surface_index = surface_index },
+        { x = 0, y = -32, surface_index = surface_index },
+        { x = -32, y = 0, surface_index = surface_index },
+        { x = 0, y = 0, surface_index = surface_index }
     }
     
     local spawn_tile = Constants.spawn_surface_material[planet.name]
-    
+    game.print("Handling ".. planet.name)
     -- This should not happen when generate_spawn is called before
     local tiles = {}
 
@@ -615,15 +639,16 @@ local function reveal_spawn_area(surface_index)
         local key = Functions.position_to_string(chunk_left_top)
         if minesweeper.chunks[key] then
             game.print("Removing chunk mines: ".. key)
-            remove_mines_from_chunk(chunk_left_top)
+            remove_mines_from_chunk(chunk_left_top, surface_index)
         end
-        
     end
 end
 
 local function on_surface_created(event)
     local surface_index = event.surface_index
     if not Functions.is_minesweeper_planet(surface_index) then return end
+
+    game.print("Generated minesweeper surface!")
 
     generate_spawn(surface_index)
     reveal_spawn_area(surface_index)
@@ -691,7 +716,7 @@ local function on_nth_tick()
         for index = #blasts, 1, -1 do
             local blast = blasts[index]
             if not blast.projectile.valid then
-                Functions.restore_blast_terrain(blast.terrain)
+                Functions.restore_blast_terrain(blast.terrain, blast.surface_index)
                 table.remove(blasts, index)
             end
         end
@@ -704,7 +729,7 @@ local function on_nth_tick()
     if #minesweeper.visit_queue > 0 then
         local position = table.remove(minesweeper.visit_queue, 1)
         if position then
-            visit_cell(position)
+            visit_cell(position, position.surface_index)
         end
     end
 end
